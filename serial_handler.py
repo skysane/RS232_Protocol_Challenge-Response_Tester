@@ -14,12 +14,12 @@ class SerialHandler:
         ports = serial.tools.list_ports.comports()
         return [port.device for port in ports]
 
-    def connect(self, port, baudrate=9600):
+    def connect(self, port, baudrate=9600, timeout=1):
         """Connects to the specified serial port."""
         try:
             self.port = port
             self.baudrate = baudrate
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
+            self.ser = serial.Serial(self.port, self.baudrate, timeout=timeout/1000.0)
             if self.ser.isOpen():
                 return True
             else:
@@ -46,6 +46,7 @@ class SerialHandler:
         if not self.is_connected():
             return False
         try:
+            self.ser.reset_output_buffer()
             self.ser.write(data)
             return True
         except serial.SerialTimeoutException:

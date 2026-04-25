@@ -1,5 +1,17 @@
 # challenge_response_logic.py
 
+def calculate_checksum(data):
+    """Calculates the checksum (sum of bytes) and returns the formatted hex ASCII representation.
+
+    Args:
+        data (bytes): The data to calculate checksum for.
+
+    Returns:
+        str: 2-character hex ASCII string (e.g., 'A5').
+    """
+    checksum = sum(data) & 0xFF
+    return f"{checksum:02X}"
+
 def decode_challenge_data(response_bytes):
     """Extracts bytes 5-12 from a 16-byte response.
 
@@ -15,37 +27,28 @@ def decode_challenge_data(response_bytes):
     # So, we need bytes from index 4 up to (but not including) index 12.
     return response_bytes[4:12]
 
-def calculate_xor_offset_answer(challenge_data):
-    """Performs XOR and offset calculation on the challenge data.
+def calculate_xor_offset_answer(challenge_data, xor_indices, offsets):
+    """Performs XOR and offset calculation on the challenge data based on user configuration.
 
     Args:
         challenge_data (bytes): The 8 bytes extracted from the response.
+        xor_indices (list of tuple): List of 4 tuples, each containing two byte indices to XOR.
+        offsets (list of int): List of 4 integer offsets.
 
     Returns:
-        bytes: The calculated answer, formatted as needed for the protocol.
+        bytes: The calculated answer of 4 bytes.
     """
     if len(challenge_data) != 8:
         raise ValueError(f"Expected 8 bytes of challenge data, but got {len(challenge_data)} bytes.")
 
-    # Placeholder for XOR operation. This is a simplified example.
-    # The actual XOR logic needs to be defined by the protocol specification.
-    # For now, let's assume a simple XOR with a fixed value or sum.
-    xor_result = 0
-    for byte in challenge_data:
-        xor_result ^= byte
+    answers = []
+    for i in range(4):
+        idx1, idx2 = xor_indices[i]
+        offset = offsets[i]
+        result = (challenge_data[idx1] ^ challenge_data[idx2] + offset) & 0xFF
+        answers.append(result)
 
-    # Placeholder for offset operation. This is a simplified example.
-    # The actual offset value and operation needs to be defined by the protocol.
-    # For now, let's add a fixed offset.
-    offset = 10
-    final_answer_value = (xor_result + offset) & 0xFF # Keep it within a byte range for simplicity
-
-    # The spec requires assembling the answer into a protocol format.
-    # This typically involves specific header/footer bytes and the answer value.
-    # Example: [START_BYTE] [ANSWER_VALUE] [END_BYTE]
-    # For now, let's return the single byte answer for demonstration.
-    # A real implementation would format this into a byte string as per protocol.
-    return bytes([final_answer_value])
+    return bytes(answers)
 
 def assemble_response_protocol(answer_bytes):
     """Assembles the final answer into the protocol format for transmission.
