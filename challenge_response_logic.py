@@ -1,16 +1,26 @@
 # challenge_response_logic.py
 
 def calculate_checksum(data):
-    """Calculates the checksum (sum of bytes) and returns the formatted hex ASCII representation.
+    """Calculates the checksum (sum of bytes), masks to 8 bits, 
+    and returns the 2-byte ASCII representation of the high and low nibbles.
 
     Args:
         data (bytes): The data to calculate checksum for.
 
     Returns:
-        str: 2-character hex ASCII string (e.g., 'A5').
+        bytes: 2 bytes (high nibble ASCII, low nibble ASCII).
     """
     checksum = sum(data) & 0xFF
-    return f"{checksum:02X}"
+    high_nibble = (checksum >> 4) & 0x0F
+    low_nibble = checksum & 0x0F
+    
+    def nibble_to_ascii(nibble):
+        if 0 <= nibble <= 9:
+            return nibble + 0x30
+        else:
+            return nibble - 10 + 0x41 # 'A' is 0x41
+
+    return bytes([nibble_to_ascii(high_nibble), nibble_to_ascii(low_nibble)])
 
 def decode_challenge_data(response_bytes):
     """Extracts bytes 5-12 from a 16-byte response.

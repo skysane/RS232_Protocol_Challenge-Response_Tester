@@ -29,7 +29,7 @@ class RS232TesterGUI:
         self.baudrate_entry = ttk.Entry(conn_frame, textvariable=self.baudrate_var, width=10)
         self.baudrate_entry.grid(row=0, column=3, padx=5, pady=5)
 
-        ttk.Label(conn_frame, text="Timeout (ms):").grid(row=0, column=4, padx=5, pady=5, sticky="w")
+        ttk.Label(conn_frame, text="Timeout (seconds):").grid(row=0, column=4, padx=5, pady=5, sticky="w")
         self.timeout_var = tk.StringVar(value="1000")
         self.timeout_entry = ttk.Entry(conn_frame, textvariable=self.timeout_var, width=10)
         self.timeout_entry.grid(row=0, column=5, padx=5, pady=5)
@@ -44,17 +44,21 @@ class RS232TesterGUI:
         cmd_frame = ttk.LabelFrame(master, text="Challenge-Response", padding="10")
         cmd_frame.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
 
-        ttk.Label(cmd_frame, text="Command (5 bytes):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ttk.Label(cmd_frame, text="Command:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.command_entry = ttk.Entry(cmd_frame, width=20)
         self.command_entry.grid(row=0, column=1, padx=5, pady=5)
         self.command_entry.insert(0, "0102030405")
 
+        self.input_mode = tk.StringVar(value="HEX")
+        ttk.Radiobutton(cmd_frame, text="HEX", variable=self.input_mode, value="HEX").grid(row=0, column=2, padx=5, pady=5)
+        ttk.Radiobutton(cmd_frame, text="String", variable=self.input_mode, value="String").grid(row=0, column=3, padx=5, pady=5)
+
         self.cs_var = tk.BooleanVar()
         self.cs_checkbox = ttk.Checkbutton(cmd_frame, text="Enable CS", variable=self.cs_var)
-        self.cs_checkbox.grid(row=0, column=2, padx=5, pady=5)
+        self.cs_checkbox.grid(row=0, column=4, padx=5, pady=5)
 
         self.send_cmd_button = ttk.Button(cmd_frame, text="Send Command", command=self.send_command, state=tk.DISABLED)
-        self.send_cmd_button.grid(row=0, column=3, padx=5, pady=5)
+        self.send_cmd_button.grid(row=0, column=5, padx=5, pady=5)
 
         # --- Data Display Frame ---
         data_frame = ttk.LabelFrame(master, text="Data Exchange", padding="10")
@@ -119,7 +123,7 @@ class RS232TesterGUI:
 
         try:
             baudrate = int(baudrate_str)
-            timeout = int(timeout_str)
+            timeout = float(timeout_str)
         except ValueError:
             messagebox.showerror("Connection Error", "Invalid baud rate or timeout. Please enter numbers.")
             return
@@ -153,25 +157,36 @@ class RS232TesterGUI:
         self.log_area.see(tk.END)
         self.log_area.config(state=tk.DISABLED)
 
+    def on_timeout(self):
+        """Displays timeout message."""
+        self.log("Timeout: No response received.")
+        messagebox.showinfo("Timeout", "No response received within the timeout period.")
+
     def send_command(self):
         """Handles sending a command."""
         command_str = self.command_entry.get()
         try:
-            command_bytes = bytes.fromhex(command_str)
-            if len(command_bytes) != 5:
-                messagebox.showerror("Input Error", "Command must be 5 bytes long.")
-                return
+            if self.input_mode.get() == "HEX":
+                payload = bytes.fromhex(command_str)
+            else:
+                payload = command_str.encode('utf-8')
 
-            payload = command_bytes
             if self.cs_var.get():
                 cs = self.challenge_logic.calculate_checksum(payload)
-                self.log(f"CS Enabled: {cs}")
-                payload += bytes.fromhex(cs)
+                self.log(f"CS Enabled: {cs.hex()}")
+                payload += cs
 
             self.log(f"Sending: {payload.hex()}")
             if self.serial_handler.send_data(payload):
-                response = self.serial_handler.receive_data(16)
+                # Start timeout timer
+                timeout_sec = float(self.timeout_var.get())
+                timer = self.master.after(int(timeout_sec * 1000), self.on_timeout)
+                
+                response = self.serial_handler.receive_data()
+                
+                # Cancel timer if data received
                 if response:
+                    self.master.after_cancel(timer)
                     self.log(f"Received: {response.hex()}")
                     self.display_received_data(response)
                     
@@ -184,7 +199,6 @@ class RS232TesterGUI:
                         xor_str = getattr(self, f"xor_entry_{i}").get()
                         offset_str = getattr(self, f"offset_entry_{i}").get()
                         
-                        # Assuming simple index input like "0,1"
                         idx1, idx2 = map(int, xor_str.split(','))
                         xor_indices.append((idx1, idx2))
                         offsets.append(int(offset_str))
@@ -199,7 +213,7 @@ class RS232TesterGUI:
                     self.serial_handler.send_data(final_msg)
                     self.display_calculated_answer(final_msg)
                 else:
-                    self.log("Timeout/No data.")
+                    self.log("No data received.")
                     self.display_received_data(None)
         except Exception as e:
             self.log(f"Error: {e}")

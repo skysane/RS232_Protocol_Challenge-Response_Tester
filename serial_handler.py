@@ -15,11 +15,11 @@ class SerialHandler:
         return [port.device for port in ports]
 
     def connect(self, port, baudrate=9600, timeout=1):
-        """Connects to the specified serial port."""
+        """Connects to the specified serial port. timeout is in seconds."""
         try:
             self.port = port
             self.baudrate = baudrate
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=timeout/1000.0)
+            self.ser = serial.Serial(self.port, self.baudrate, timeout=timeout)
             if self.ser.isOpen():
                 return True
             else:
@@ -54,16 +54,12 @@ class SerialHandler:
         except Exception as e:
             raise e
 
-    def receive_data(self, length):
-        """Receives a specified number of bytes from the serial port."""
+    def receive_data(self):
+        """Receives all available bytes from the serial port."""
         if not self.is_connected():
             return None
         try:
-            data = self.ser.read(length)
-            if data: # If any data received
-                return data
-            else: # Timeout or no data received
-                return None
+            return self.ser.read_all()
         except serial.SerialTimeoutException:
             return None
         except Exception as e:

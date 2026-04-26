@@ -1,0 +1,5 @@
+- [ ] UI adaptation: Update `main_gui.py` to label timeout input as "Timeout (seconds)".
+- [ ] Logic refactoring: Normalize timeout units to seconds in `serial_handler.py`.
+- [ ] Reception refactoring: Remove fixed-length reading in `serial_handler.py`.
+- [ ] Validation: Test with variable data lengths.
+- [ ] Memory monitoring: Ensure no excessive memory usage during long-stream reception.
