@@ -2,12 +2,14 @@
 
 import serial
 import serial.tools.list_ports
+from data_logger import DataLogger
 
 class SerialHandler:
     def __init__(self):
         self.ser = None
         self.port = None
         self.baudrate = None
+        self.logger = DataLogger()
 
     def list_available_ports(self):
         """Lists available serial ports."""
@@ -21,6 +23,8 @@ class SerialHandler:
             self.baudrate = baudrate
             self.ser = serial.Serial(self.port, self.baudrate, timeout=timeout)
             if self.ser.isOpen():
+                self.ser.reset_input_buffer()
+                self.ser.reset_output_buffer()
                 return True
             else:
                 return False
@@ -48,6 +52,7 @@ class SerialHandler:
         try:
             self.ser.reset_output_buffer()
             self.ser.write(data)
+            self.logger.log_tx(data)
             return True
         except serial.SerialTimeoutException:
             return False
@@ -59,7 +64,10 @@ class SerialHandler:
         if not self.is_connected():
             return None
         try:
-            return self.ser.read_all()
+            data = self.ser.read_all()
+            if data:
+                self.logger.log_rx(data)
+            return data
         except serial.SerialTimeoutException:
             return None
         except Exception as e:

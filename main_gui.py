@@ -4,6 +4,20 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import serial_handler
 import challenge_response_logic
+import logging
+import datetime
+
+class GUIHandler(logging.Handler):
+    def __init__(self, log_area):
+        super().__init__()
+        self.log_area = log_area
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.log_area.config(state=tk.NORMAL)
+        self.log_area.insert(tk.END, msg + "\n")
+        self.log_area.see(tk.END)
+        self.log_area.config(state=tk.DISABLED)
 
 class RS232TesterGUI:
     def __init__(self, master):
@@ -30,7 +44,7 @@ class RS232TesterGUI:
         self.baudrate_entry.grid(row=0, column=3, padx=5, pady=5)
 
         ttk.Label(conn_frame, text="Timeout (seconds):").grid(row=0, column=4, padx=5, pady=5, sticky="w")
-        self.timeout_var = tk.StringVar(value="1000")
+        self.timeout_var = tk.StringVar(value="5.0")
         self.timeout_entry = ttk.Entry(conn_frame, textvariable=self.timeout_var, width=10)
         self.timeout_entry.grid(row=0, column=5, padx=5, pady=5)
 
@@ -60,6 +74,9 @@ class RS232TesterGUI:
         self.send_cmd_button = ttk.Button(cmd_frame, text="Send Command", command=self.send_command, state=tk.DISABLED)
         self.send_cmd_button.grid(row=0, column=5, padx=5, pady=5)
 
+        self.transmit_ans_button = ttk.Button(cmd_frame, text="Transmit Answer", command=self.transmit_answer, state=tk.DISABLED)
+        self.transmit_ans_button.grid(row=0, column=6, padx=5, pady=5)
+
         # --- Data Display Frame ---
         data_frame = ttk.LabelFrame(master, text="Data Exchange", padding="10")
         data_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
@@ -81,14 +98,22 @@ class RS232TesterGUI:
 
         # --- Log Frame ---
         log_frame = ttk.LabelFrame(master, text="Data Log", padding="10")
-        log_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
+        log_frame.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
+
+        self.clear_log_button = ttk.Button(log_frame, text="Clear Log", command=self.clear_log)
+        self.clear_log_button.pack(anchor="ne", padx=5, pady=5)
 
         self.log_area = scrolledtext.ScrolledText(log_frame, height=10, width=70)
         self.log_area.pack(fill=tk.BOTH, expand=True)
+        
+        # Setup GUI Logger
+        gui_handler = GUIHandler(self.log_area)
+        gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logging.getLogger("RS232Logger").addHandler(gui_handler)
 
         # --- Verification Settings ---
         ver_frame = ttk.LabelFrame(master, text="Verification Settings", padding="10")
-        ver_frame.grid(row=4, column=0, padx=10, pady=10, sticky="ew")
+        ver_frame.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
 
         ttk.Label(ver_frame, text="Pre-str:").grid(row=0, column=0, padx=5, pady=5)
         self.pre_str_entry = ttk.Entry(ver_frame, width=15)
@@ -150,20 +175,14 @@ class RS232TesterGUI:
         self.baudrate_entry.config(state=tk.NORMAL)
         self.clear_data_display()
 
-    def log(self, message):
-        """Logs message to the log area."""
-        self.log_area.config(state=tk.NORMAL)
-        self.log_area.insert(tk.END, message + "\n")
-        self.log_area.see(tk.END)
-        self.log_area.config(state=tk.DISABLED)
-
     def on_timeout(self):
         """Displays timeout message."""
-        self.log("Timeout: No response received.")
+        logging.getLogger("RS232Logger").info("Timeout: No response received.")
+        self.transmit_ans_button.config(state=tk.DISABLED)
         messagebox.showinfo("Timeout", "No response received within the timeout period.")
 
     def send_command(self):
-        """Handles sending a command."""
+        """Handles sending a command and receiving challenge."""
         command_str = self.command_entry.get()
         try:
             if self.input_mode.get() == "HEX":
@@ -173,50 +192,60 @@ class RS232TesterGUI:
 
             if self.cs_var.get():
                 cs = self.challenge_logic.calculate_checksum(payload)
-                self.log(f"CS Enabled: {cs.hex()}")
+                logging.getLogger("RS232Logger").info(f"CS Enabled: {cs.hex()}")
                 payload += cs
 
-            self.log(f"Sending: {payload.hex()}")
+            # 1. Send data
             if self.serial_handler.send_data(payload):
-                # Start timeout timer
+                logging.getLogger("RS232Logger").info(f"Command sent: {payload.hex()}")
+                
+                # 2. Start timeout timer
                 timeout_sec = float(self.timeout_var.get())
                 timer = self.master.after(int(timeout_sec * 1000), self.on_timeout)
                 
+                # 3. Receive data
                 response = self.serial_handler.receive_data()
                 
                 # Cancel timer if data received
                 if response:
                     self.master.after_cancel(timer)
-                    self.log(f"Received: {response.hex()}")
                     self.display_received_data(response)
-                    
-                    # Process challenge-response
-                    challenge_data = self.challenge_logic.decode_challenge_data(response)
-                    
-                    xor_indices = []
-                    offsets = []
-                    for i in range(4):
-                        xor_str = getattr(self, f"xor_entry_{i}").get()
-                        offset_str = getattr(self, f"offset_entry_{i}").get()
-                        
-                        idx1, idx2 = map(int, xor_str.split(','))
-                        xor_indices.append((idx1, idx2))
-                        offsets.append(int(offset_str))
-
-                    answer_bytes = self.challenge_logic.calculate_xor_offset_answer(challenge_data, xor_indices, offsets)
-                    
-                    # Pre-string
-                    pre_str = self.pre_str_entry.get().encode()
-                    final_msg = pre_str + self.challenge_logic.assemble_response_protocol(answer_bytes)
-                    
-                    self.log(f"Sending Answer: {final_msg.hex()}")
-                    self.serial_handler.send_data(final_msg)
-                    self.display_calculated_answer(final_msg)
+                    self.latest_challenge = response
+                    self.transmit_ans_button.config(state=tk.NORMAL)
+                    logging.getLogger("RS232Logger").info(f"Challenge received: {response.hex()}")
                 else:
-                    self.log("No data received.")
                     self.display_received_data(None)
         except Exception as e:
-            self.log(f"Error: {e}")
+            logging.getLogger("RS232Logger").error(f"Error: {e}")
+            messagebox.showerror("Error", str(e))
+
+    def transmit_answer(self):
+        """Transmits the verified answer."""
+        try:
+            # Process challenge-response
+            challenge_data = self.challenge_logic.decode_challenge_data(self.latest_challenge)
+            
+            xor_indices = []
+            offsets = []
+            for i in range(4):
+                xor_str = getattr(self, f"xor_entry_{i}").get()
+                offset_str = getattr(self, f"offset_entry_{i}").get()
+                
+                idx1, idx2 = map(int, xor_str.split(','))
+                xor_indices.append((idx1, idx2))
+                offsets.append(int(offset_str))
+
+            answer_bytes = self.challenge_logic.calculate_xor_offset_answer(challenge_data, xor_indices, offsets)
+            
+            # Pre-string
+            pre_str = self.pre_str_entry.get().encode()
+            final_msg = pre_str + self.challenge_logic.assemble_response_protocol(answer_bytes)
+            
+            self.serial_handler.send_data(final_msg)
+            self.display_calculated_answer(final_msg)
+            self.transmit_ans_button.config(state=tk.DISABLED)
+        except Exception as e:
+            logging.getLogger("RS232Logger").error(f"Error: {e}")
             messagebox.showerror("Error", str(e))
 
     def display_received_data(self, data):
@@ -238,6 +267,12 @@ class RS232TesterGUI:
         else:
             self.calculated_answer_text.insert(tk.END, "Could not calculate answer.")
         self.calculated_answer_text.config(state=tk.DISABLED)
+
+    def clear_log(self):
+        """Clears the log area."""
+        self.log_area.config(state=tk.NORMAL)
+        self.log_area.delete(1.0, tk.END)
+        self.log_area.config(state=tk.DISABLED)
 
     def clear_data_display(self):
         """Clears the data display areas."""
